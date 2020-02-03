@@ -100,85 +100,84 @@ free_area_t free_area;
 
 static void
 default_init(void) {
-    list_init(&free_list);
-    nr_free = 0;
+	nr_free = 0;
+	list_init(&free_list);
 }
 
 static void
 default_init_memmap(struct Page *base, size_t n) {
-	struct Page *x = base;
-	while (x != base + n) {
-		// set `PG_property`  `p->flags` to 0
-		x->property = x->flags = 0;
-		set_page_ref(x, 0);
-		++x;
+	struct Page *page = base;
+	while (page != base + n) {
+		// 初始化 base[0] -> base[n - 1]
+		page->flags = page->property = 0;
+		set_page_ref(page, 0);
+		++page;
 	}
 	base->property = n;
-	SetPageProperty(base);
+	SetPageProperty(page);
 	nr_free += n;
+	// 插入 链表
 	list_add_before(&free_list, &(base->page_link));
 }
 
 static struct Page *
 default_alloc_pages(size_t n) {
-	// nr_free 总的最大存储空间
-	if (n > nr_free) return NULL;
-	// 遍历查找最先匹配
+	// 查找最先 匹配
+	if (nr_free < n) return NULL;
 	struct Page *page = NULL;
 	list_entry_t *entry = &free_list;
 	while ((entry = list_next(entry)) != &free_list) {
-		struct Page *x = le2page(entry, page_link);
-		if (x->property >= n) {
-			page = x;
+		struct Page *p = le2page(entry, page_link);
+		if (p->property >= n) {
+			page = p;
 			break;
 		}
 	}
-    if (page) {
-    	if (page->property > n) {
-    		(page + n)->property = page->property - n;
-    		SetPageProperty(page + n);
-    		list_add_after(&(page->page_link), &((page + n)->page_link));
-    	}
-    	ClearPageProperty(page);
-    	list_del(&(page->page_link));
-    	nr_free -= n;
-    }
-    return page;
+	if (page) {
+		if (page->property > n) {
+			(page + n)->property = page->property - n;
+			SetPageProperty(page + n);
+			list_add_after(&(page->page_link), &((page + n)->page_link));
+		}
+		list_del(&(page->page_link));
+		ClearPageProperty(page);
+		nr_free -= n;
+	}
+	return page;
 }
 
 static void
 default_free_pages(struct Page *base, size_t n) {
-	struct Page *x = base;
-	while (x != base + n) {
-		x->flags = 0;
-		set_page_ref(x, 0);
-		++x;
+	struct Page *page = base;
+	while (page != base + n) {
+		page->flags = 0;
+		set_page_ref(page, 0);
+		++page;
 	}
 	base->property = n;
 	SetPageProperty(base);
 	list_entry_t *entry = &free_list;
 	while ((entry = list_next(entry)) != &free_list) {
-		x = le2page(entry, page_link);
-		if (x + x->property == base) {
-			// del x
-			x->property += base->property;
+		page = le2page(entry, page_link);
+		if (page + page->property == base) {
+			page->property += n;
 			ClearPageProperty(base);
-			base = x;
-			list_del(&(x->page_link));
-		} else if (base + base->property == x) {
-			base->property += x->property;
-			ClearPageProperty(x);
-			list_del(&(x->page_link));
+			base = page;
+			list_del(&(page->page_link));
+		} else if (base + base->property == page) {
+			base->property += page->property;
+			ClearPageProperty(page);
+			list_del(&(page->page_link));
 		}
 	}
-	nr_free += n;
 	entry = &free_list;
 	while ((entry = list_next(entry)) != &free_list) {
-		x = le2page(entry, page_link);
-		if (base + base->property < x) {
+		page = le2page(entry, page_link);
+		if (page > base + base->property) {
 			break;
 		}
 	}
+	nr_free += n;
 	list_add_before(entry, &(base->page_link));
 }
 

@@ -34,6 +34,13 @@ static struct pseudodesc idt_pd = {
 /* idt_init - initialize IDT to each of the entry points in kern/trap/vectors.S */
 void
 idt_init(void) {
+	extern uintptr_t __vectors[];
+	int i;
+	for (i = 0; i < 256; ++i) {
+		SETGATE(idt[i], 0, GD_KTEXT, __vectors[i], DPL_KERNEL);
+	}
+	SETGATE(idt[T_SYSCALL], 1, GD_KTEXT, __vectors[T_SYSCALL], DPL_USER);
+	lidt(&idt_pd);
      /* LAB1 YOUR CODE : STEP 2 */
      /* (1) Where are the entry addrs of each Interrupt Service Routine (ISR)?
       *     All ISR's entry addrs are stored in __vectors. where is uintptr_t __vectors[] ?
@@ -134,6 +141,8 @@ print_regs(struct pushregs *regs) {
     cprintf("  eax  0x%08x\n", regs->reg_eax);
 }
 
+struct trapframe k2u, *u2k;
+
 /* trap_dispatch - dispatch based on what type of trap occurred */
 static void
 trap_dispatch(struct trapframe *tf) {
@@ -147,6 +156,10 @@ trap_dispatch(struct trapframe *tf) {
          * (2) Every TICK_NUM cycle, you can print some info using a funciton, such as print_ticks().
          * (3) Too Simple? Yes, I think so!
          */
+		if (++ticks == TICK_NUM) {
+			print_ticks();
+			ticks = 0;
+		}
         break;
     case IRQ_OFFSET + IRQ_COM1:
         c = cons_getc();
@@ -156,10 +169,25 @@ trap_dispatch(struct trapframe *tf) {
         c = cons_getc();
         cprintf("kbd [%03d] %c\n", c, c);
         break;
-    //LAB1 CHALLENGE 1 : YOUR CODE you should modify below codes.
     case T_SWITCH_TOU:
+    	if (tf->tf_cs != USER_CS) {
+    		k2u = *tf;
+    		k2u.tf_cs = USER_CS;
+    		k2u.tf_ds = k2u.tf_es = k2u.tf_ss = USER_DS;
+    		k2u.tf_esp = (uint32_t)tf + sizeof(struct trapframe) - 8;
+    		k2u.tf_eflags |= FL_IOPL_MASK;
+    		*((uint32_t *)tf - 1) = (uint32_t)&k2u;
+    	}
+    	break;
     case T_SWITCH_TOK:
-        panic("T_SWITCH_** ??\n");
+    	if (tf->tf_cs != KERNEL_CS) {
+    		tf->tf_cs = KERNEL_CS;
+    		tf->tf_ds = tf->tf_es = KERNEL_DS;
+    		tf->tf_eflags &= ~FL_IOPL_MASK;
+    		u2k = (struct trapframe *)(tf->tf_esp - (sizeof(struct trapframe) - 8));
+    		memmove(u2k, tf, sizeof(struct trapframe) - 8);
+    		*((uint32_t *)tf - 1) = (uint32_t)u2k;
+    	}
         break;
     case IRQ_OFFSET + IRQ_IDE1:
     case IRQ_OFFSET + IRQ_IDE2:

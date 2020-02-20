@@ -104,19 +104,22 @@ default_init(void) {
 	list_init(&free_list);
 }
 
+typedef struct Page Page;
+
 static void
 default_init_memmap(struct Page *base, size_t n) {
-	struct Page *page = base;
+
+	// 初始化一块很大的内存
+	Page *page = base;
 	while (page != base + n) {
-		// 初始化 base[0] -> base[n - 1]
 		page->flags = page->property = 0;
 		set_page_ref(page, 0);
 		++page;
 	}
 	base->property = n;
-	SetPageProperty(page);
+	SetPageProperty(base);
 	nr_free += n;
-	// 插入 链表
+	// 链表插入
 	list_add_before(&free_list, &(base->page_link));
 }
 
@@ -124,10 +127,10 @@ static struct Page *
 default_alloc_pages(size_t n) {
 	// 查找最先 匹配
 	if (nr_free < n) return NULL;
-	struct Page *page = NULL;
+	Page *page = NULL;
 	list_entry_t *entry = &free_list;
 	while ((entry = list_next(entry)) != &free_list) {
-		struct Page *p = le2page(entry, page_link);
+		Page *p = le2page(entry, page_link);
 		if (p->property >= n) {
 			page = p;
 			break;

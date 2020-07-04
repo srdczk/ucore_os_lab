@@ -339,6 +339,24 @@ pmm_init(void) {
 // return vaule: the kernel virtual address of this pte
 pte_t *
 get_pte(pde_t *pgdir, uintptr_t la, bool create) {
+    uint32_t pd_index = PDX(la);
+    uint32_t pt_pa = pgdir[pd_index];
+    if (!(pt_pa & PTE_P)) {
+        if (create) {
+            struct Page *page = alloc_page();
+            if (!page) return NULL;
+            //set_page_ref(page,1) : means the page be referenced by one time
+            //     *   page2pa(page): get the physical address of memory which this (struct Page *) page  manages
+            //     *   struct Page * alloc_page() : allocation a page
+            //     *   memset(void *s, char c, size_t n)
+            set_page_ref(page, 1);
+            pte_t *va = KADDR(PDE_ADDR(page2pa(page)));
+            memset(va, '\0', PGSIZE);
+            pgdir[pd_index] = PDE_ADDR(page2pa(page)) | PTE_P | PTE_U | PTE_W;
+            return va + PTX(la);
+        }
+        return NULL;
+    } else return (pte_t *)(KADDR(PDE_ADDR(pt_pa))) + PTX(la);
     /* LAB2 EXERCISE 2: YOUR CODE
      *
      * If you need to visit a physical address, please use KADDR()
@@ -392,6 +410,13 @@ get_page(pde_t *pgdir, uintptr_t la, pte_t **ptep_store) {
 //note: PT is changed, so the TLB need to be invalidate 
 static inline void
 page_remove_pte(pde_t *pgdir, uintptr_t la, pte_t *ptep) {
+
+    struct Page *page = pte2page(*ptep);
+    page_ref_dec(page);
+    if (!page->ref) free_page(page);
+
+    *ptep &= ~PTE_P;
+    tlb_invalidate(pgdir, la);
     /* LAB2 EXERCISE 3: YOUR CODE
      *
      * Please check if ptep is valid, and tlb must be manually updated if mapping is updated

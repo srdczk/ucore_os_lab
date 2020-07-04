@@ -81,11 +81,11 @@ lab1_print_cur_status(void) {
     round ++;
 }
 
+uint32_t esp, ss;
+
 static void
 lab1_switch_to_user(void) {
     // ss, and esp push to stack
-    uint32_t esp;
-    uint16_t ss;
     asm volatile ("movw %%ss, %0;"
                   "movl %%esp, %1;"
                    : "=a" (ss), "=b" (esp));

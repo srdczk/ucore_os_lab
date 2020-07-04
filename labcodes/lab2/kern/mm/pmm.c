@@ -333,7 +333,7 @@ get_pte(pde_t *pgdir, uintptr_t la, bool create) {
         struct Page *page = alloc_page();
         if (!page) return NULL;
         set_page_ref(page, 1);
-        pte_t *va = KADDR(page2pa(page));
+        pte_t *va = KADDR(PDE_ADDR(page2pa(page)));
         memset(va, '\0', PGSIZE);
         pgdir[pd_index] = PDE_ADDR(page2pa(page)) | PTE_U | PTE_W | PTE_P;
         return va + PTX(la);

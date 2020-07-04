@@ -83,23 +83,23 @@ lab1_print_cur_status(void) {
 
 static void
 lab1_switch_to_user(void) {
-	asm volatile(
-			"sub $0x8, %%esp;"
-			"int %0;"
-			"mov %%ebp, %%esp;"
-			:
-			: "i"(T_SWITCH_TOU)
-			);
+    // ss, and esp push to stack
+    uint32_t esp;
+    uint16_t ss;
+    asm volatile ("movw %%ss, %0;"
+                  "movl %%esp, %1;"
+                   : "=a" (ss), "=b" (esp));
+    asm volatile ("pushl %0;"
+                  "pushl %1;"
+                  "int %2;"
+                  :: "a" (ss), "b" (esp), "i" (T_SWITCH_TOU));
 }
 
 static void
 lab1_switch_to_kernel(void) {
-	asm volatile(
-			"int %0;"
-			"mov %%ebp, %%esp;"
-			:
-			: "i"(T_SWITCH_TOK)
-			);
+    asm volatile ("int %0;"
+                  "popl %%esp;"
+                  :: "i"(T_SWITCH_TOK));
 }
 
 static void

@@ -93,100 +93,136 @@
  *      Try to merge blocks at lower or higher addresses. Notice: This should
  *  change some pages' `p->property` correctly.
  */
+
 free_area_t free_area;
 
 #define free_list (free_area.free_list)
 #define nr_free (free_area.nr_free)
 
-static void
-default_init(void) {
-	nr_free = 0;
-	list_init(&free_list);
+
+static void ff_init() {
+    list_init(&free_list);
+    nr_free = 0;
 }
 
-typedef struct Page Page;
+//(3) `default_init_memmap`:
+//*  CALL GRAPH: `kern_init` --> `pmm_init` --> `page_init` --> `init_memmap` -->
+//* `pmm_manager` --> `init_memmap`.
+//*  This function is used to initialize a free block (with parameter `addr_base`,
+//* `page_number`). In order to initialize a free block, firstly, you should
+//* initialize each page (defined in memlayout.h) in this free block. This
+//        * procedure includes:
+//*  - Setting the bit `PG_property` of `p->flags`, which means this page is
+//        * valid. P.S. In function `pmm_init` (in pmm.c), the bit `PG_reserved` of
+//* `p->flags` is already set.
+//*  - If this page is free and is not the first page of a free block,
+//* `p->property` should be set to 0.
+//*  - If this page is free and is the first page of a free block, `p->property`
+//* should be set to be the total number of pages in the block.
+//*  - `p->ref` should be 0, because now `p` is free and has no reference.
+//*  After that, We can use `p->page_link` to link this page into `free_list`.
+//* (e.g.: `list_add_before(&free_list, &(p->page_link));` )
+//*  Finally, we should update the sum of the free memory blocks: `nr_free += n`.
+//
+static void ff_init_memmap(struct Page *base, size_t n) {
+    struct Page *page = base;
+    while (page != base + n) {
+        assert(PageReserved(page));
+        page->flags = page->property = 0;
+        set_page_ref(page, 0);
+        // page should be set
+        SetPageProperty(page);
+        ++page;
+    }
+    base->property = n;
+    nr_free += n;
+    list_add(&free_list, &base->page_link);
+}
+
+static struct Page *ff_alloc_pages(size_t n) {
+    if (nr_free < n) return NULL;
+    // circle linked list
+    list_entry_t *le = &free_list;
+    while ((le = list_next(le)) != &free_list) {
+        struct Page *page = le2page(le, page_link);
+        if (page->property >= n) {
+            for (struct Page *p = page; p != (page + n); ++p)
+                ClearPageProperty(p);
+            if (page->property > n) {
+                (page + n)->property = page->property - n;
+                list_add_after(&page->page_link, &(page + n)->page_link);
+            }
+            list_del(&page->page_link);
+            nr_free -= n;
+            return page;
+        }
+    }
+    return NULL;
+}
+
+static bool merge(struct Page *page) {
+    list_entry_t *next = list_next(&page->page_link);
+    if (next == &free_list) return 0;
+    struct Page *nextPage = le2page(next, page_link);
+    if (nextPage == page + page->property) {
+        page->property += nextPage->property;
+        nextPage->property = 0;
+        list_del(&nextPage->page_link);
+        return 1;
+    } else return 0;
+}
+
+static void ff_free_pages(struct Page *base, size_t n) {
+    struct Page *page = base;
+    while (page != base + n) {
+        assert(!PageReserved(page) && !PageProperty(page));
+        SetPageProperty(page);
+        set_page_ref(page, 0);
+        ++page;
+    }
+
+    base->property = n;
+
+    list_entry_t *le = list_next(&free_list);
+    for (; le != (&free_list) && le < (&base->page_link); le = list_next(le));
+    list_add_before(le, &(base->page_link));
+    nr_free += n;
+    while (merge(base));
+    for (list_entry_t *pre = list_prev(&base->page_link); pre != &free_list; pre = list_prev(pre)) {
+        if (!merge(le2page(pre, page_link))) break;
+    }
+}
+
+
+static size_t
+ff_nr_free_pages(void) {
+    return nr_free;
+}
+
+
+static void
+default_init(void) {
+    ff_init();
+}
 
 static void
 default_init_memmap(struct Page *base, size_t n) {
-
-	// 初始化一块很大的内存
-	Page *page = base;
-	while (page != base + n) {
-		page->flags = page->property = 0;
-		set_page_ref(page, 0);
-		++page;
-	}
-	base->property = n;
-	SetPageProperty(base);
-	nr_free += n;
-	// 链表插入
-	list_add_before(&free_list, &(base->page_link));
+    ff_init_memmap(base, n);
 }
 
 static struct Page *
 default_alloc_pages(size_t n) {
-	// 查找最先 匹配
-	if (nr_free < n) return NULL;
-	Page *page = NULL;
-	list_entry_t *entry = &free_list;
-	while ((entry = list_next(entry)) != &free_list) {
-		Page *p = le2page(entry, page_link);
-		if (p->property >= n) {
-			page = p;
-			break;
-		}
-	}
-	if (page) {
-		if (page->property > n) {
-			(page + n)->property = page->property - n;
-			SetPageProperty(page + n);
-			list_add_after(&(page->page_link), &((page + n)->page_link));
-		}
-		list_del(&(page->page_link));
-		ClearPageProperty(page);
-		nr_free -= n;
-	}
-	return page;
+    return ff_alloc_pages(n);
 }
 
 static void
 default_free_pages(struct Page *base, size_t n) {
-	struct Page *page = base;
-	while (page != base + n) {
-		page->flags = 0;
-		set_page_ref(page, 0);
-		++page;
-	}
-	base->property = n;
-	SetPageProperty(base);
-	list_entry_t *entry = &free_list;
-	while ((entry = list_next(entry)) != &free_list) {
-		page = le2page(entry, page_link);
-		if (page + page->property == base) {
-			page->property += n;
-			ClearPageProperty(base);
-			base = page;
-			list_del(&(page->page_link));
-		} else if (base + base->property == page) {
-			base->property += page->property;
-			ClearPageProperty(page);
-			list_del(&(page->page_link));
-		}
-	}
-	entry = &free_list;
-	while ((entry = list_next(entry)) != &free_list) {
-		page = le2page(entry, page_link);
-		if (page > base + base->property) {
-			break;
-		}
-	}
-	nr_free += n;
-	list_add_before(entry, &(base->page_link));
+    ff_free_pages(base, n);
 }
 
 static size_t
 default_nr_free_pages(void) {
-    return nr_free;
+    return ff_nr_free_pages();
 }
 
 static void

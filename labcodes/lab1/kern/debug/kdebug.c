@@ -290,16 +290,19 @@ read_eip(void) {
  * */
 void
 print_stackframe(void) {
-	uint32_t ebp = read_ebp(), eip = read_eip();
-	int i;
-	for (i = 0; ebp && i < STACKFRAME_DEPTH; ++i) {
-		cprintf("eip:0x%08x ebp:0x%08x ", eip, ebp);
-		uint32_t *start = (uint32_t *)ebp + 2;
-		cprintf("args:0x%08x 0x%08x 0x%08x 0x%08x\n", start[0], start[1], start[2], start[3]);
-		print_debuginfo(eip - 1);
-		eip = *((uint32_t *)ebp + 1);
-		ebp = *((uint32_t *)ebp);
-	}
+    uint32_t ebp = read_ebp(), eip = read_eip(), cnt = 0;
+    while (ebp && cnt < STACKFRAME_DEPTH) {
+
+        cprintf("ebp:0x%08x eip:0x%08x ", ebp, eip);
+        // args
+        uint32_t *args = (uint32_t *)ebp + 2;
+        cprintf("args:0x%08x 0x%08x 0x%08x 0x%08x\n", args[0], args[1], args[2], args[3]);
+        print_debuginfo(eip - 1);
+        // update eip and ebp
+        eip = *((uint32_t *)(ebp + 4));
+        ebp = *((uint32_t *)(ebp));
+        cnt++;
+    }
      /* LAB1 YOUR CODE : STEP 1 */
      /* (1) call read_ebp() to get the value of ebp. the type is (uint32_t);
       * (2) call read_eip() to get the value of eip. the type is (uint32_t);

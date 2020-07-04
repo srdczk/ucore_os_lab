@@ -323,9 +323,21 @@ pmm_init(void) {
 //  pgdir:  the kernel virtual base address of PDT
 //  la:     the linear address need to map
 //  create: a logical value to decide if alloc a page for PT
-// return vaule: the kernel virtual address of this pte
+// return value: the kernel virtual address of this pte
 pte_t *
 get_pte(pde_t *pgdir, uintptr_t la, bool create) {
+    uint32_t pd_index = PDX(la);
+    uint32_t pt_pa = pgdir[pd_index];
+    if (!(pt_pa & PTE_P)) {
+        if (!create) return NULL;
+        struct Page *page = alloc_page();
+        if (!page) return NULL;
+        set_page_ref(page, 1);
+        pte_t *va = KADDR(page2pa(page));
+        memset(va, '\0', PGSIZE);
+        pgdir[pd_index] = PDE_ADDR(page2pa(page)) | PTE_U | PTE_W | PTE_P;
+        return va + PTX(la);
+    } else return (pte_t *) KADDR(PDE_ADDR(pt_pa)) + PTX(la);
     /* LAB2 EXERCISE 2: YOUR CODE
      *
      * If you need to visit a physical address, please use KADDR()
@@ -359,26 +371,6 @@ get_pte(pde_t *pgdir, uintptr_t la, bool create) {
     }
     return NULL;          // (8) return page table entry
 #endif
-    // 找到相应 虚拟地址 对应的页表
-	uint32_t index = PDX(la);
-	// pde_t *普通物理地址
-	// pgdir 每一个页表项
-	typedef struct Page Page;
-	if (!(pgdir[index] & PTE_P)) {
-		if (!create) return NULL;
-		// 新分配 一页
-		Page *page = alloc_page();
-		if (!page) return NULL;
-		// 已经分配了这一页
-		set_page_ref(page, 1);
-		// 页面 物理地址
-		uintptr_t pa = page2pa(page);
-		memset(KADDR(pa), 0, PGSIZE);
-		// 物理地址
-		pgdir[index] = pa | PTE_P | PTE_W | PTE_U;
-	}
-
-	return (pte_t *)KADDR(PDE_ADDR(pgdir[index])) + PTX(la);
 }
 
 //get_page - get related Page struct for linear address la using PDT pgdir
@@ -399,6 +391,14 @@ get_page(pde_t *pgdir, uintptr_t la, pte_t **ptep_store) {
 //note: PT is changed, so the TLB need to be invalidate 
 static inline void
 page_remove_pte(pde_t *pgdir, uintptr_t la, pte_t *ptep) {
+
+    struct Page *page = pte2page(*ptep);
+    page_ref_dec(page);
+    if (!page->ref) free_page(page);
+    *ptep &= ~PTE_P;
+    tlb_invalidate(pgdir, la);
+
+    // free for pte
     /* LAB2 EXERCISE 3: YOUR CODE
      *
      * Please check if ptep is valid, and tlb must be manually updated if mapping is updated
@@ -424,16 +424,6 @@ page_remove_pte(pde_t *pgdir, uintptr_t la, pte_t *ptep) {
                                   //(6) flush tlb
     }
 #endif
-    // free page -> 取消在pte 中的映射
-	typedef struct Page Page;
-	// ptep -> 就是对应的页表项
-	if (*ptep & PTE_P) {
-		// ptep 有效
-		Page *page = pte2page(*ptep);
-		if (!page_ref_dec(page)) free_page(page);
-		*ptep = 0;
-		tlb_invalidate(pgdir, la);
-	}
 }
 
 //page_remove - free an Page which is related linear address la and has an validated pte

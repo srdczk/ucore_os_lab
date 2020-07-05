@@ -293,6 +293,16 @@ read_eip(void) {
  * */
 void
 print_stackframe(void) {
+    uint32_t eip = read_eip(), ebp = read_ebp(), cnt = 0;
+    while (ebp && cnt < STACKFRAME_DEPTH) {
+        cprintf("ebp:0x%08x eip:0x%08x ", ebp, eip);
+        uint32_t *args = (uint32_t *)ebp + 2;
+        cprintf("args:0x%08x 0x%08x 0x%08x 0x%08x\n", args[0], args[1], args[2], args[3]);
+        print_debuginfo(eip - 1);
+        eip = *((uint32_t *)(ebp + 4));
+        ebp = *((uint32_t *)ebp);
+        ++cnt;
+    }
      /* LAB1 YOUR CODE : STEP 1 */
      /* (1) call read_ebp() to get the value of ebp. the type is (uint32_t);
       * (2) call read_eip() to get the value of eip. the type is (uint32_t);
